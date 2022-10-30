@@ -45,6 +45,7 @@ func NewTx(chainID uint16, nonce uint64, fromID AccountID, toID AccountID, value
 	return tx, nil
 }
 
+// Sign uses the specified private key to sign the transaction.
 func (tx Tx) Sign(privateKey *ecdsa.PrivateKey) (SignedTx, error) {
 
 	// Sign the transaction with the private key to produce a signature.
@@ -137,6 +138,8 @@ func NewBlockTx(signedTx SignedTx, gasPrice uint64, unitsOfGas uint64) BlockTx {
 	}
 }
 
+// Hash implements the merkle Hashable interface for providing a hash
+// of a block transaction.
 func (tx BlockTx) Hash() ([]byte, error) {
 	str := signature.Hash(tx)
 
