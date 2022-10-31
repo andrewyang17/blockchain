@@ -83,3 +83,20 @@ func isHex(a AccountID) bool {
 func isHexCharacter(c byte) bool {
 	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
 }
+
+// =============================================================================
+
+// byAccount provides sorting support by the account id value.
+type byAccount []Account
+
+func (ba byAccount) Len() int {
+	return len(ba)
+}
+
+func (ba byAccount) Less(i, j int) bool {
+	return ba[i].AccountID < ba[j].AccountID
+}
+
+func (ba byAccount) Swap(i, j int) {
+	ba[i], ba[j] = ba[j], ba[i]
+}
