@@ -163,6 +163,11 @@ func (s *State) LatestBlock() database.Block {
 	return s.db.LatestBlock()
 }
 
+// MempoolLength returns the current length of the mempool.
+func (s *State) MempoolLength() int {
+	return s.mempool.Count()
+}
+
 // Mempool returns a copy of the mempool.
 func (s *State) Mempool() []database.BlockTx {
 	return s.mempool.PickBest()
