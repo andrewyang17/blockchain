@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ardanlabs/blockchain/foundation/blockchain/database"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/database"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/spf13/cobra"
 )
