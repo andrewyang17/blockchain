@@ -11,6 +11,7 @@ import (
 	"github.com/andrewyang17/blockchain/foundation/events"
 	"github.com/andrewyang17/blockchain/foundation/nameservice"
 	"github.com/andrewyang17/blockchain/foundation/web"
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +28,11 @@ type Config struct {
 // PublicRoutes binds all the version 1 public routes.
 func PublicRoutes(app *web.App, cfg Config) {
 	pbl := public.Handlers{
-		Log: cfg.Log,
+		Log:   cfg.Log,
+		State: cfg.State,
+		NS:    cfg.NS,
+		WS:    websocket.Upgrader{},
+		Evts:  cfg.Evts,
 	}
 
 	app.Handle(http.MethodGet, version, "/events", pbl.Events)
