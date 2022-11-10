@@ -7,13 +7,22 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/andrewyang17/blockchain/app/services/node/handlers"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/database"
 	"github.com/andrewyang17/blockchain/foundation/blockchain/genesis"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/peer"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/state"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/storage/disk"
+	"github.com/andrewyang17/blockchain/foundation/blockchain/worker"
+	"github.com/andrewyang17/blockchain/foundation/events"
 	"github.com/andrewyang17/blockchain/foundation/logger"
+	"github.com/andrewyang17/blockchain/foundation/nameservice"
 	"github.com/ardanlabs/conf/v3"
+	"github.com/ethereum/go-ethereum/crypto"
 	"go.uber.org/zap"
 )
 
@@ -57,6 +66,16 @@ func run(log *zap.SugaredLogger) error {
 			PublicHost      string        `conf:"default:0.0.0.0:8080"`
 			PrivateHost     string        `conf:"default:0.0.0.0:9080"`
 		}
+		State struct {
+			Beneficiary    string   `conf:"default:miner1"`
+			DBPath         string   `conf:"default:zblock/miner1/"`
+			SelectStrategy string   `conf:"default:Tip"`
+			OriginPeers    []string `conf:"default:0.0.0.0:9080"` //
+			Consensus      string   `conf:"default:POW"`          // Change to POA to run Proof of Authority
+		}
+		NameService struct {
+			Folder string `conf:"default:zblock/accounts/"`
+		}
 	}{
 		Version: conf.Version{
 			Build: build,
@@ -97,7 +116,58 @@ func run(log *zap.SugaredLogger) error {
 	log.Infow("startup", "config", out)
 
 	// =========================================================================
+	// Name Service Support
+
+	// The nameservice package provides name resolution for account addresses.
+	// The names come from the file names in the zblock/accounts folder.
+	ns, err := nameservice.New(cfg.NameService.Folder)
+	if err != nil {
+		return fmt.Errorf("unable to load account name service: %w", err)
+	}
+
+	// Logging the accounts for documentation in the logs.
+	for account, name := range ns.Copy() {
+		log.Infow("startup", "status", "nameservice", "name", name, "account", account)
+	}
+
+	// =========================================================================
 	// Blockchain Support
+
+	// Need to load the private key file for the configured beneficiary so the
+	// account can get credited with fees and tips.
+	path := fmt.Sprintf("%s%s.ecdsa", cfg.NameService.Folder, cfg.State.Beneficiary)
+	privateKey, err := crypto.LoadECDSA(path)
+	if err != nil {
+		return fmt.Errorf("unable to load private key for node: %w", err)
+	}
+
+	// A peer set is a collection of known nodes in the network so transactions
+	// and blocks can be shared.
+	peerSet := peer.NewPeerSet()
+	for _, host := range cfg.State.OriginPeers {
+		peerSet.Add(peer.New(host))
+	}
+	peerSet.Add(peer.New(cfg.Web.PrivateHost))
+
+	// The blockchain packages accept a function of this signature to allow the
+	// application to log. For now, these raw messages are sent to any websocket
+	// client that is connected into the system through the events package.
+	evts := events.New()
+	ev := func(v string, args ...any) {
+		const websocketPrefix = "viewer:"
+
+		s := fmt.Sprintf(v, args...)
+		log.Infow(s, "traceid", "00000000-0000-0000-0000-000000000000")
+		if strings.HasPrefix(s, websocketPrefix) {
+			evts.Send(s)
+		}
+	}
+
+	// Construct the use of disk storage.
+	storage, err := disk.New(cfg.State.DBPath)
+	if err != nil {
+		return err
+	}
 
 	// Load the genesis file for blockchain settings and origin balances.
 	genesis, err := genesis.Load()
@@ -105,7 +175,27 @@ func run(log *zap.SugaredLogger) error {
 		return err
 	}
 
-	log.Infow("startup", "genesis", genesis)
+	// The state value represents the blockchain node and manages the blockchain
+	// database and provides an API for application support.
+	state, err := state.New(state.Config{
+		BeneficiaryID:  database.PublicKeyToAccountID(privateKey.PublicKey),
+		Host:           cfg.Web.PrivateHost,
+		Storage:        storage,
+		Genesis:        genesis,
+		SelectStrategy: cfg.State.SelectStrategy,
+		KnownPeers:     peerSet,
+		Consensus:      cfg.State.Consensus,
+		EvHandler:      ev,
+	})
+	if err != nil {
+		return err
+	}
+	defer state.Shutdown()
+
+	// The worker package implements the different workflows such as mining,
+	// transaction peer sharing, and peer updates. The worker will register
+	// itself with the state.
+	worker.Run(state, ev)
 
 	// =========================================================================
 	// Start Debug Service
